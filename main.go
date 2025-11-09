@@ -179,6 +179,12 @@ func migrateSession(session *Session, oldPath, newPath string) error {
 		return fmt.Errorf("failed to copy session files: %w", err)
 	}
 
+	// Step 3: Copy project-specific .claude directory
+	if err := copyProjectSettings(oldPath, newPath); err != nil {
+		// Not fatal - project might not have .claude directory
+		warn("Could not copy .claude settings (this is OK if project doesn't have one): %v", err)
+	}
+
 	return nil
 }
 
@@ -333,6 +339,55 @@ func encodeProjectPath(path string) string {
 	encoded = strings.ReplaceAll(encoded, ".", "-")
 	// Add leading -
 	return "-" + encoded
+}
+
+func copyProjectSettings(oldPath, newPath string) error {
+	oldClaudeDir := filepath.Join(oldPath, ".claude")
+	newClaudeDir := filepath.Join(newPath, ".claude")
+
+	// Check if old .claude exists
+	if _, err := os.Stat(oldClaudeDir); os.IsNotExist(err) {
+		return nil // No .claude directory, nothing to copy
+	}
+
+	// Create new .claude directory
+	if err := os.MkdirAll(newClaudeDir, 0700); err != nil {
+		return fmt.Errorf("failed to create .claude directory: %w", err)
+	}
+
+	// Copy settings.local.json if exists
+	oldSettings := filepath.Join(oldClaudeDir, "settings.local.json")
+	newSettings := filepath.Join(newClaudeDir, "settings.local.json")
+
+	if data, err := os.ReadFile(oldSettings); err == nil {
+		if err := os.WriteFile(newSettings, data, 0644); err != nil {
+			return fmt.Errorf("failed to copy settings: %w", err)
+		}
+	}
+
+	// Copy any other files in .claude directory
+	entries, err := os.ReadDir(oldClaudeDir)
+	if err != nil {
+		return fmt.Errorf("failed to read .claude directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if entry.Name() == "settings.local.json" {
+			continue // Already copied
+		}
+
+		oldFile := filepath.Join(oldClaudeDir, entry.Name())
+		newFile := filepath.Join(newClaudeDir, entry.Name())
+
+		if data, err := os.ReadFile(oldFile); err == nil {
+			os.WriteFile(newFile, data, 0644)
+		}
+	}
+
+	return nil
 }
 
 func loadHistory() ([]*HistoryEntry, error) {
